@@ -31,7 +31,7 @@ export default function RewardsPage() {
 
   useEffect(() => {
     const saved = loadData()
-    setData(saved || { rewards: demoRewards, points: demoPoints })
+    setData(saved || { rewards: [], points: { total_earned: 0, total_spent: 0, current_balance: 0 } })
   }, [])
 
   const persist = useCallback((newData: any) => {

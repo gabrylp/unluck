@@ -74,11 +74,11 @@ export default function DashboardPage() {
   useEffect(() => {
     const saved = loadData()
     const initial = saved || {
-      targets: demoTargets,
-      tasks: demoTasks,
-      completions: demoCompletions,
-      points: demoPoints,
-      streak: demoStreak,
+      targets: [],
+      tasks: [],
+      completions: [],
+      points: { total_earned: 0, total_spent: 0, current_balance: 0 },
+      streak: { current_streak: 0, longest_streak: 0, last_activity_date: '', streak_mode: 'easy' },
     }
     setData(initial)
     setExpandedTargets(new Set(initial.targets.map((t: any) => t.id)))

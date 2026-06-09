@@ -32,7 +32,7 @@ export default function BuilderPage() {
 
   useEffect(() => {
     const saved = loadData()
-    setData(saved || { targets: demoTargets, tasks: demoTasks, completions: demoCompletions, points: demoPoints, streak: demoStreak })
+    setData(saved || { targets: [], tasks: [], completions: [], points: { total_earned: 0, total_spent: 0, current_balance: 0 }, streak: { current_streak: 0, longest_streak: 0, last_activity_date: '', streak_mode: 'easy' } })
   }, [])
 
   const persist = useCallback((newData: any) => {
@@ -105,6 +105,20 @@ export default function BuilderPage() {
     toast.success('Deleted')
   }
 
+  const handleDeleteTarget = (targetId: string) => {
+    if (!confirm('Delete this target and all its tasks?')) return
+    persist({
+      ...data,
+      targets: data.targets.filter((t: any) => t.id !== targetId),
+      tasks: data.tasks.filter((t: any) => t.target_id !== targetId),
+      completions: data.completions.filter((c: any) => {
+        const taskIds = data.tasks.filter((t: any) => t.target_id === targetId).map((t: any) => t.id)
+        return !taskIds.includes(c.task_id)
+      }),
+    })
+    toast.success('Target deleted')
+  }
+
   const handleDisconnect = (id: string) => {
     persist({
       ...data,
@@ -166,6 +180,7 @@ export default function BuilderPage() {
         onDeleteTask={handleDeleteTask}
         onEditTask={handleEditTask}
         onDisconnect={handleDisconnect}
+        onDeleteTarget={handleDeleteTarget}
         onConnect={(sourceId, targetId) => {
           if (sourceId === targetId) {
             toast.error('Cannot connect a node to itself')

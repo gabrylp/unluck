@@ -29,7 +29,7 @@ export default function LibraryPage() {
 
   useEffect(() => {
     const saved = loadData()
-    setLinks(saved || demoLinks)
+    setLinks(saved || [])
   }, [])
 
   const persist = useCallback((newLinks: ReferenceLink[]) => {

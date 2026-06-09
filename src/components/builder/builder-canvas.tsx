@@ -104,9 +104,10 @@ interface BuilderCanvasProps {
   onEditTask: (id: string) => void
   onConnect: (sourceId: string, targetId: string) => void
   onDisconnect?: (id: string) => void
+  onDeleteTarget?: (targetId: string) => void
 }
 
-export function BuilderCanvas({ targets, tasks, onAddTask, onDeleteTask, onEditTask, onConnect, onDisconnect }: BuilderCanvasProps) {
+export function BuilderCanvas({ targets, tasks, onAddTask, onDeleteTask, onEditTask, onConnect, onDisconnect, onDeleteTarget }: BuilderCanvasProps) {
   const [mode, setMode] = useState<BuilderMode>('task')
   const [connectSource, setConnectSource] = useState<string | null>(null)
   const [showPopup, setShowPopup] = useState<string | null>(null)
@@ -152,20 +153,20 @@ export function BuilderCanvas({ targets, tasks, onAddTask, onDeleteTask, onEditT
 
   const handleNodePointerDown = useCallback((nodeId: string, e: React.PointerEvent) => {
     if (mode === 'connect') {
+      pointerStart.current[nodeId] = { x: e.clientX, y: e.clientY }
+      delete holdFired.current[nodeId]
+      holdTimers.current[nodeId] = setTimeout(() => {
+        holdFired.current[nodeId] = true
+        onDisconnect?.(nodeId)
+        toast.success('Disconnected')
+      }, 400)
+    } else {
       handleNodeTap(nodeId)
-      return
     }
-    pointerStart.current[nodeId] = { x: e.clientX, y: e.clientY }
-    delete holdFired.current[nodeId]
-    holdTimers.current[nodeId] = setTimeout(() => {
-      holdFired.current[nodeId] = true
-      onDisconnect?.(nodeId)
-      toast.success('Disconnected')
-    }, 400)
   }, [mode, handleNodeTap, onDisconnect])
 
   const handleNodePointerMove = useCallback((nodeId: string, e: React.PointerEvent) => {
-    if (mode !== 'task') return
+    if (mode !== 'connect') return
     const start = pointerStart.current[nodeId]
     if (!start) return
     const dx = e.clientX - start.x
@@ -183,7 +184,7 @@ export function BuilderCanvas({ targets, tasks, onAddTask, onDeleteTask, onEditT
       clearTimeout(holdTimers.current[nodeId])
       delete holdTimers.current[nodeId]
     }
-    if (!holdFired.current[nodeId] && mode === 'task') {
+    if (!holdFired.current[nodeId] && mode === 'connect') {
       handleNodeTap(nodeId)
     }
     delete pointerStart.current[nodeId]
@@ -222,7 +223,16 @@ export function BuilderCanvas({ targets, tasks, onAddTask, onDeleteTask, onEditT
 
       {targetNodes.map((td) => (
         <div className="glass rounded-none p-4 mb-4" key={td.targetId}>
-          <h3 className="text-sm font-medium text-white/80 mb-3">{td.targetTitle}</h3>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-medium text-white/80">{td.targetTitle}</h3>
+            <button
+              onClick={() => onDeleteTarget?.(td.targetId)}
+              className="text-white/30 hover:text-red-400 transition-colors text-sm leading-none px-1"
+              title="Delete target"
+            >
+              ×
+            </button>
+          </div>
 
           <svg
             width={td.width}
