@@ -1,0 +1,28 @@
+-- Seed templates (inserted via app, not as direct SQL since they need user_id)
+-- This is a reference for the app's template seeding logic.
+
+-- Suggested initial template structure:
+-- Target: Mind
+--   Task: Meditate (daily)
+--     Task: Journal (daily)
+--   Task: Read (daily)
+-- Target: Body
+--   Task: Exercise (daily)
+--     Task: Stretch (daily)
+--     Task: Cardio (daily)
+--   Task: Drink water (daily)
+-- Target: School
+--   Task: Study (daily)
+--   Task: Review notes (daily)
+-- Target: Environment
+--   Task: Tidy room (daily)
+--   Task: Organize desk (daily)
+-- Target: Discipline
+--   Task: Wake up early (daily)
+--   Task: Plan the day (daily)
+-- Target: Career
+--   Task: Learn a skill (daily)
+--   Task: Update resume (manual)
+-- Target: Digital
+--   Task: Limit social media (daily)
+--   Task: Digital sunset (daily)
