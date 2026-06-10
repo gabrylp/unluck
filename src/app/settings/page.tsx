@@ -10,15 +10,19 @@ import { toast } from 'sonner'
 const STORAGE_KEY = 'unluck-settings'
 
 export default function SettingsPage() {
-  const [streakMode, setStreakMode] = useState<StreakMode>('easy')
+  const [streakMode, setStreakMode] = useState<StreakMode>(() => {
+    if (typeof window === 'undefined') return 'easy'
 
-  useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY)
-    if (saved) {
+    if (!saved) return 'easy'
+
+    try {
       const parsed = JSON.parse(saved)
-      setStreakMode(parsed.streakMode || 'easy')
+      return parsed.streakMode || 'easy'
+    } catch {
+      return 'easy'
     }
-  }, [])
+  })
 
   const updateMode = (mode: StreakMode) => {
     setStreakMode(mode)
