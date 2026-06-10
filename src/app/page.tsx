@@ -1,19 +1,17 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
-// framer-motion imports removed
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { SkillTree } from '@/components/skill-tree'
+import { TargetBuilderTree } from '@/components/builder/target-builder-tree'
 import { PointBadge } from '@/components/points/point-badge'
 import { StreakIndicator } from '@/components/streaks/streak-indicator'
 import { Dialog } from '@/components/ui/dialog'
 import { TargetForm } from '@/components/targets/target-form'
 import { TaskForm } from '@/components/tasks/task-form'
 import { Button } from '@/components/ui/button'
-import { TargetWithProgress, Task, TimeSection, CompletionType, TaskWithChildren } from '@/lib/types'
-import { buildTaskTree, getParentChain } from '@/lib/utils'
-import {
-  demoTargets, demoTasks, demoCompletions, demoPoints, demoStreak, demoUserId,
-} from '@/lib/demo-data'
+import { TargetWithProgress, Task, TimeSection, CompletionType } from '@/lib/types'
+import { buildTaskTree, getParentChain, getAllDescendantIds } from '@/lib/utils'
+import { demoUserId } from '@/lib/demo-data'
 import { toast } from 'sonner'
 
 const STORAGE_KEY = 'unluck-demo'
@@ -27,8 +25,10 @@ const SECTIONS: { label: string; key: TimeSection | null }[] = [
 
 function loadData() {
   if (typeof window === 'undefined') return null
-  const stored = localStorage.getItem(STORAGE_KEY)
-  if (stored) return JSON.parse(stored)
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY)
+    if (stored) return JSON.parse(stored)
+  } catch {}
   return null
 }
 
@@ -36,7 +36,7 @@ function saveData(data: any) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
 }
 
-function isSubtreeComplete(node: TaskWithChildren, completed: Set<string>): boolean {
+function isSubtreeComplete(node: any, completed: Set<string>): boolean {
   if (!completed.has(node.id)) return false
   for (const child of node.children) {
     if (!isSubtreeComplete(child, completed)) return false
@@ -44,7 +44,7 @@ function isSubtreeComplete(node: TaskWithChildren, completed: Set<string>): bool
   return true
 }
 
-function markSubtreeComplete(node: TaskWithChildren, completed: Set<string>, subtreeSet: Set<string>) {
+function markSubtreeComplete(node: any, completed: Set<string>, subtreeSet: Set<string>) {
   if (isSubtreeComplete(node, completed)) {
     subtreeSet.add(node.id)
   }
@@ -53,23 +53,23 @@ function markSubtreeComplete(node: TaskWithChildren, completed: Set<string>, sub
   }
 }
 
-function getAllDescendantIds(taskId: string, tasks: Task[]): string[] {
-  const ids: string[] = [taskId]
-  const children = tasks.filter((t) => t.parent_id === taskId)
-  for (const child of children) {
-    ids.push(...getAllDescendantIds(child.id, tasks))
-  }
-  return ids
-}
-
 export default function DashboardPage() {
   const [data, setData] = useState<any>(null)
+  const [mode, setMode] = useState<'main' | 'builder'>('main')
+  const [builderSubMode, setBuilderSubMode] = useState<'task' | 'connect'>('task')
+  const [connectSource, setConnectSource] = useState<string | null>(null)
+  const [showPopup, setShowPopup] = useState<string | null>(null)
   const [showTargetDialog, setShowTargetDialog] = useState(false)
   const [showTaskDialog, setShowTaskDialog] = useState(false)
   const [selectedTargetId, setSelectedTargetId] = useState<string | null>(null)
+  const [selectedParentId, setSelectedParentId] = useState<string | null>(null)
+  const [editingTask, setEditingTask] = useState<Task | null>(null)
   const [expandedTargets, setExpandedTargets] = useState<Set<string>>(new Set())
   const [dragTargetId, setDragTargetId] = useState<string | null>(null)
   const [dragOverSection, setDragOverSection] = useState<string | null>(null)
+
+  const dataRef = useRef(data)
+  useEffect(() => { dataRef.current = data }, [data])
 
   useEffect(() => {
     const saved = loadData()
@@ -84,6 +84,14 @@ export default function DashboardPage() {
     setExpandedTargets(new Set(initial.targets.map((t: any) => t.id)))
   }, [])
 
+  useEffect(() => {
+    if (mode === 'main') {
+      setBuilderSubMode('task')
+      setConnectSource(null)
+      setShowPopup(null)
+    }
+  }, [mode])
+
   const persist = useCallback((newData: any) => {
     setData(newData)
     saveData(newData)
@@ -97,14 +105,21 @@ export default function DashboardPage() {
     const targetTasks = data.tasks.filter((tk: any) => tk.target_id === t.id)
     const tree = buildTaskTree(targetTasks, completedIds)
 
+    const rootIds = new Set(
+      targetTasks.filter((tk: any) => !tk.parent_id).map((tk: any) => tk.id)
+    )
+
     const subtreeCompleteIds = new Set<string>()
     for (const root of tree) {
       markSubtreeComplete(root, completedIds, subtreeCompleteIds)
     }
 
-    function countAll(node: TaskWithChildren): { total: number; completed: number } {
+    function countAll(node: any): { total: number; completed: number } {
       let total = 1
-      let completed = subtreeCompleteIds.has(node.id) ? 1 : 0
+      const isCompleted = rootIds.has(node.id)
+        ? subtreeCompleteIds.has(node.id)
+        : completedIds.has(node.id)
+      let completed = isCompleted ? 1 : 0
       for (const child of node.children) {
         const sub = countAll(child)
         total += sub.total
@@ -113,10 +128,12 @@ export default function DashboardPage() {
       return { total, completed }
     }
 
-    function markSubtreeFlag(node: TaskWithChildren): TaskWithChildren {
+    function markSubtreeFlag(node: any): any {
       return {
         ...node,
-        completed: subtreeCompleteIds.has(node.id),
+        completed: rootIds.has(node.id)
+          ? subtreeCompleteIds.has(node.id)
+          : completedIds.has(node.id),
         children: node.children.map(markSubtreeFlag),
       }
     }
@@ -142,39 +159,28 @@ export default function DashboardPage() {
   })
 
   const handleToggleComplete = (taskId: string) => {
-    const task = data.tasks.find((t: any) => t.id === taskId)
+    const d = dataRef.current
+    if (!d) return
+    const task = d.tasks.find((t: any) => t.id === taskId)
     if (!task) return
 
-    const existingIds = new Set(data.completions.map((c: any) => c.task_id))
+    const rootIds = new Set(d.tasks.filter((t: any) => !t.parent_id).map((t: any) => t.id))
+    const existingIds = new Set(d.completions.map((c: any) => c.task_id))
 
     if (existingIds.has(taskId)) {
-      const toRemove = getAllDescendantIds(taskId, data.tasks)
-      const newCompletions = data.completions.filter((c: any) => !toRemove.includes(c.task_id))
+      const toRemove = getAllDescendantIds(taskId, d.tasks)
+      const finalCompletions = d.completions.filter((c: any) => !toRemove.includes(c.task_id))
 
-      const ancestorIds = getParentChain(taskId, data.tasks).filter((id) => id !== taskId)
-      const ancestorsToRemove: string[] = []
-      for (const aid of ancestorIds) {
-        const descs = getAllDescendantIds(aid, data.tasks)
-        const allComplete = descs.every((did) =>
-          newCompletions.some((c: any) => c.task_id === did)
-        )
-        if (!allComplete) {
-          ancestorsToRemove.push(aid)
-        }
-      }
-
-      const finalCompletions = newCompletions.filter(
-        (c: any) => !ancestorsToRemove.includes(c.task_id)
-      )
-
-      const allRemoved = [...toRemove, ...ancestorsToRemove]
-      const removedCount = allRemoved.filter((id) => existingIds.has(id)).length
+      const removedSet = new Set(toRemove)
+      const pointLoss = d.completions
+        .filter((c: any) => removedSet.has(c.task_id))
+        .reduce((sum: number, c: any) => sum + (c.points_awarded ?? 1), 0)
 
       let bonusPenalty = 0
-      const targetTasks = data.tasks.filter((t: any) => t.target_id === task.target_id)
+      const targetTasks = d.tasks.filter((t: any) => t.target_id === task.target_id)
       const allTaskIds = new Set(targetTasks.map((t: any) => t.id))
       const wasTargetComplete = [...allTaskIds].every((id) =>
-        data.completions.some((c: any) => c.task_id === id)
+        d.completions.some((c: any) => c.task_id === id)
       )
       if (wasTargetComplete) {
         const isTargetNowComplete = [...allTaskIds].every((id) =>
@@ -186,23 +192,24 @@ export default function DashboardPage() {
       }
 
       const newPoints = {
-        ...data.points,
-        total_earned: Math.max(0, data.points.total_earned - removedCount - bonusPenalty),
-        current_balance: Math.max(0, data.points.current_balance - removedCount - bonusPenalty),
+        ...d.points,
+        total_earned: Math.max(0, d.points.total_earned - pointLoss - bonusPenalty),
+        current_balance: Math.max(0, d.points.current_balance - pointLoss - bonusPenalty),
       }
 
-      persist({
-        ...data,
-        completions: finalCompletions,
-        points: newPoints,
-      })
+      persist({ ...d, completions: finalCompletions, points: newPoints })
 
       const penaltyMsg = bonusPenalty > 0 ? ` -${bonusPenalty} bonus` : ''
-      toast.info(removedCount > 0 ? `-${removedCount} pts${penaltyMsg}` : 'Already undone')
+      toast.info(pointLoss > 0 ? `-${pointLoss} pt${pointLoss > 1 ? 's' : ''}${penaltyMsg}` : 'Already undone')
       return
     }
 
-    const chain = getParentChain(taskId, data.tasks)
+    if (rootIds.has(taskId)) {
+      toast.info('Complete all tasks under this target first')
+      return
+    }
+
+    const chain = getParentChain(taskId, d.tasks)
     const newCompletions: any[] = []
 
     for (const id of chain) {
@@ -212,7 +219,7 @@ export default function DashboardPage() {
           user_id: demoUserId,
           task_id: id,
           completed_date: new Date().toISOString().split('T')[0],
-          points_awarded: 1,
+          points_awarded: rootIds.has(id) ? 0 : 1,
           created_at: new Date().toISOString(),
         })
       }
@@ -223,10 +230,10 @@ export default function DashboardPage() {
       return
     }
 
-    const earned = newCompletions.length
+    const earned = newCompletions.reduce((sum: number, c: any) => sum + (c.points_awarded ?? 1), 0)
     let bonusEarned = 0
 
-    const targetTasks = data.tasks.filter((t: any) => t.target_id === task.target_id)
+    const targetTasks = d.tasks.filter((t: any) => t.target_id === task.target_id)
     const allTaskIds = new Set(targetTasks.map((t: any) => t.id))
     const allNowComplete = [...allTaskIds].every((id) =>
       existingIds.has(id) || newCompletions.some((c: any) => c.task_id === id)
@@ -237,13 +244,13 @@ export default function DashboardPage() {
     }
 
     const newPoints = {
-      ...data.points,
-      total_earned: data.points.total_earned + earned + bonusEarned,
-      current_balance: data.points.current_balance + earned + bonusEarned,
+      ...d.points,
+      total_earned: d.points.total_earned + earned + bonusEarned,
+      current_balance: d.points.current_balance + earned + bonusEarned,
     }
 
     const today = new Date().toISOString().split('T')[0]
-    let newStreak = { ...data.streak }
+    let newStreak = { ...d.streak }
     if (newStreak.last_activity_date !== today) {
       const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0]
       if (newStreak.last_activity_date === yesterday || !newStreak.last_activity_date) {
@@ -256,17 +263,16 @@ export default function DashboardPage() {
     }
 
     persist({
-      ...data,
-      completions: [...data.completions, ...newCompletions],
+      ...d,
+      completions: [...d.completions, ...newCompletions],
       points: newPoints,
       streak: newStreak,
     })
 
-    const msg = earned > 1 ? `+${earned} pts chain` : `+1 pt`
-    toast.success(bonusEarned ? `${msg} +${bonusEarned} bonus` : msg)
+    toast.success(bonusEarned ? `+${earned} pt${earned > 1 ? 's' : ''} +${bonusEarned} bonus` : `+${earned} pt${earned > 1 ? 's' : ''}`)
   }
 
-  const handleAddTarget = (formData: { title: string }) => {
+  const handleTargetSubmit = (formData: { title: string }) => {
     const newTarget = {
       id: crypto.randomUUID(),
       user_id: demoUserId,
@@ -276,31 +282,171 @@ export default function DashboardPage() {
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }
-    const newData = { ...data, targets: [...data.targets, newTarget] }
-    persist(newData)
-    setExpandedTargets(new Set([...expandedTargets, newTarget.id]))
+    persist({ ...data, targets: [...data.targets, newTarget] })
     setShowTargetDialog(false)
     toast.success('Target created')
   }
 
-  const handleAddTask = (formData: { title: string; description: string; completion_type: CompletionType }) => {
-    if (!selectedTargetId) return
+  const handleTaskSubmit = (formData: { title: string; description: string; completion_type: CompletionType }) => {
+    if (editingTask) {
+      persist({
+        ...data,
+        tasks: data.tasks.map((t: any) =>
+          t.id === editingTask.id
+            ? { ...t, title: formData.title, description: formData.description, completion_type: formData.completion_type, updated_at: new Date().toISOString() }
+            : t
+        ),
+      })
+      setShowTaskDialog(false)
+      setEditingTask(null)
+      setSelectedParentId(null)
+      toast.success('Task updated')
+      return
+    }
+
+    const targetId = selectedParentId
+      ? (data.tasks.find((t: any) => t.id === selectedParentId)?.target_id ?? selectedTargetId ?? null)
+      : (selectedTargetId ?? data.targets[0]?.id ?? null)
+
+    if (!targetId) {
+      toast.error('No target available')
+      return
+    }
+
     const newTask: Task = {
       id: crypto.randomUUID(),
       user_id: demoUserId,
-      target_id: selectedTargetId,
-      parent_id: null,
+      target_id: targetId,
+      parent_id: selectedParentId,
       title: formData.title,
       description: formData.description,
       completion_type: formData.completion_type,
       custom_schedule: null,
-      sort_order: data.tasks.filter((t: any) => t.target_id === selectedTargetId).length,
+      sort_order: data.tasks.length,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }
     persist({ ...data, tasks: [...data.tasks, newTask] })
     setShowTaskDialog(false)
+    setSelectedParentId(null)
     toast.success('Task added')
+  }
+
+  const handleDeleteTask = (id: string) => {
+    const toDelete = new Set<string>()
+    const collectIds = (taskId: string) => {
+      toDelete.add(taskId)
+      data.tasks.filter((t: any) => t.parent_id === taskId).forEach((t: any) => collectIds(t.id))
+    }
+    collectIds(id)
+    persist({
+      ...data,
+      tasks: data.tasks.filter((t: any) => !toDelete.has(t.id)),
+    })
+    toast.success('Deleted')
+  }
+
+  const handleDeleteTarget = (targetId: string) => {
+    if (!confirm('Delete this target and all its tasks?')) return
+    const taskIds = data.tasks.filter((t: any) => t.target_id === targetId).map((t: any) => t.id)
+    persist({
+      ...data,
+      targets: data.targets.filter((t: any) => t.id !== targetId),
+      tasks: data.tasks.filter((t: any) => t.target_id !== targetId),
+      completions: data.completions.filter((c: any) => !taskIds.includes(c.task_id)),
+    })
+    toast.success('Target deleted')
+  }
+
+  const handleDisconnect = (id: string) => {
+    persist({
+      ...data,
+      tasks: data.tasks.map((t: any) => t.id === id ? { ...t, parent_id: null } : t),
+    })
+  }
+
+  const handleEditTask = (id: string) => {
+    const task = data.tasks.find((t: any) => t.id === id)
+    if (task) {
+      setEditingTask(task)
+      setShowTaskDialog(true)
+    }
+  }
+
+  const handleBuilderAddChild = (targetId: string, parentId: string | null) => {
+    setSelectedTargetId(targetId)
+    setSelectedParentId(parentId)
+    setShowTaskDialog(true)
+  }
+
+  const handleBuilderNodeTap = (nodeId: string) => {
+    if (builderSubMode === 'connect') {
+      if (!connectSource) {
+        setConnectSource(nodeId)
+      } else if (connectSource !== nodeId) {
+        const srcTask = data.tasks.find((t: any) => t.id === connectSource)
+        const tgtTask = data.tasks.find((t: any) => t.id === nodeId)
+        if (!srcTask || !tgtTask) {
+          toast.error('Invalid connection')
+          setConnectSource(null)
+          return
+        }
+        if (srcTask.target_id !== tgtTask.target_id) {
+          toast.error('Cannot connect tasks from different targets')
+          setConnectSource(null)
+          return
+        }
+        let current = connectSource
+        while (current) {
+          const t = data.tasks.find((tk: any) => tk.id === current)
+          if (!t || !t.parent_id) break
+          if (t.parent_id === nodeId) {
+            toast.error('Cannot create a loop')
+            setConnectSource(null)
+            return
+          }
+          current = t.parent_id
+        }
+        const updated = data.tasks.map((t: any) =>
+          t.id === nodeId ? { ...t, parent_id: connectSource } : t
+        )
+        persist({ ...data, tasks: updated })
+        setConnectSource(null)
+        toast.success('Connected')
+      } else {
+        setConnectSource(null)
+      }
+    } else {
+      setShowPopup(showPopup === nodeId ? null : nodeId)
+    }
+  }
+
+  const handleSeedTemplates = () => {
+    if (!confirm('Replace all data with template targets?')) return
+    const templateTargets = ['Mind', 'Body', 'School', 'Environment', 'Discipline', 'Career', 'Digital'].map((title, i) => ({
+      id: crypto.randomUUID(),
+      user_id: demoUserId,
+      title,
+      time_section: ['morning', 'morning', 'afternoon', 'night', 'morning', 'afternoon', 'night'][i] as any,
+      sort_order: i,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }))
+
+    const templateTasks: Task[] = [
+      { id: crypto.randomUUID(), user_id: demoUserId, target_id: templateTargets[0].id, parent_id: null, title: 'Meditate', description: '10 min', completion_type: 'daily', custom_schedule: null, sort_order: 0, created_at: '', updated_at: '' },
+      { id: crypto.randomUUID(), user_id: demoUserId, target_id: templateTargets[0].id, parent_id: null, title: 'Read', description: '20 pages', completion_type: 'daily', custom_schedule: null, sort_order: 1, created_at: '', updated_at: '' },
+      { id: crypto.randomUUID(), user_id: demoUserId, target_id: templateTargets[1].id, parent_id: null, title: 'Exercise', description: '30 min', completion_type: 'daily', custom_schedule: null, sort_order: 0, created_at: '', updated_at: '' },
+      { id: crypto.randomUUID(), user_id: demoUserId, target_id: templateTargets[1].id, parent_id: null, title: 'Stretch', description: '', completion_type: 'daily', custom_schedule: null, sort_order: 1, created_at: '', updated_at: '' },
+      { id: crypto.randomUUID(), user_id: demoUserId, target_id: templateTargets[2].id, parent_id: null, title: 'Study', description: '', completion_type: 'daily', custom_schedule: null, sort_order: 0, created_at: '', updated_at: '' },
+      { id: crypto.randomUUID(), user_id: demoUserId, target_id: templateTargets[3].id, parent_id: null, title: 'Tidy room', description: '', completion_type: 'daily', custom_schedule: null, sort_order: 0, created_at: '', updated_at: '' },
+      { id: crypto.randomUUID(), user_id: demoUserId, target_id: templateTargets[4].id, parent_id: null, title: 'Wake up early', description: 'Before 7am', completion_type: 'daily', custom_schedule: null, sort_order: 0, created_at: '', updated_at: '' },
+      { id: crypto.randomUUID(), user_id: demoUserId, target_id: templateTargets[5].id, parent_id: null, title: 'Learn a skill', description: '30 min', completion_type: 'daily', custom_schedule: null, sort_order: 0, created_at: '', updated_at: '' },
+      { id: crypto.randomUUID(), user_id: demoUserId, target_id: templateTargets[6].id, parent_id: null, title: 'Limit social media', description: '< 30 min', completion_type: 'daily', custom_schedule: null, sort_order: 0, created_at: '', updated_at: '' },
+    ]
+
+    persist({ targets: templateTargets, tasks: templateTasks, completions: [], points: data.points, streak: data.streak })
+    toast.success('Templates loaded')
   }
 
   const toggleTarget = (id: string) => {
@@ -346,14 +492,28 @@ export default function DashboardPage() {
     setDragOverSection(null)
   }
 
+  const closeTaskDialog = () => {
+    setShowTaskDialog(false)
+    setEditingTask(null)
+    setSelectedParentId(null)
+  }
+
+  const switchBuilderSubMode = (m: 'task' | 'connect') => {
+    setBuilderSubMode(m)
+    setConnectSource(null)
+    setShowPopup(null)
+  }
+
   return (
     <div className="pb-4">
       <div className="flex items-center justify-between mb-5 pt-3">
         <div>
-          <h1 className="text-xl font-bold text-white/90">Roadmap</h1>
-          <p className="text-xs text-white/40 mt-0.5">
-            {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
-          </p>
+          <h1 className="text-xl font-bold text-white/90">Unluck</h1>
+          {mode === 'main' && (
+            <p className="text-xs text-white/40 mt-0.5">
+              {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <StreakIndicator current={data.streak.current_streak} longest={data.streak.longest_streak} />
@@ -361,23 +521,69 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div className="flex gap-2 mb-5">
-        <Button size="sm" onClick={() => setShowTargetDialog(true)}>+ Target</Button>
-        <Button size="sm" variant="secondary" onClick={() => {
-          const t = data.targets[0]
-          if (t) {
-            setSelectedTargetId(t.id)
-            setShowTaskDialog(true)
-          } else {
-            toast.error('Create a target first')
-          }
-        }}>+ Task</Button>
+      <div className="flex items-center gap-2 mb-5 flex-wrap">
+        <div className="flex gap-1 rounded-none border border-white/10 p-0.5">
+          <button
+            onClick={() => setMode('main')}
+            className={`px-4 py-1.5 rounded-none text-xs font-medium transition-all ${
+              mode === 'main' ? 'bg-white text-black' : 'text-white/60 hover:text-white/80'
+            }`}
+          >
+            Main
+          </button>
+          <button
+            onClick={() => setMode('builder')}
+            className={`px-4 py-1.5 rounded-none text-xs font-medium transition-all ${
+              mode === 'builder' ? 'bg-white text-black' : 'text-white/60 hover:text-white/80'
+            }`}
+          >
+            Builder
+          </button>
+        </div>
+
+        {mode === 'builder' && (
+          <div className="glass rounded-none flex items-center gap-2 px-2 py-1.5">
+            <div className="flex gap-1 rounded-none border border-white/10 p-0.5">
+              {(['task', 'connect'] as const).map((m) => (
+                <button
+                  key={m}
+                  onClick={() => switchBuilderSubMode(m)}
+                  className={`px-3 py-1.5 rounded-none text-xs font-medium transition-all ${
+                    builderSubMode === m
+                      ? 'bg-white text-black'
+                      : 'text-white/60 hover:text-white/80'
+                  }`}
+                >
+                  {m === 'task' ? 'Task' : 'Connect'}
+                </button>
+              ))}
+            </div>
+            <div className="w-px h-5 bg-white/10" />
+            <button
+              onClick={() => setShowTargetDialog(true)}
+              className="px-3 py-1.5 rounded-none text-xs font-medium text-white/80 hover:text-white transition-all"
+            >
+              + Target
+            </button>
+            <button
+              onClick={handleSeedTemplates}
+              className="px-3 py-1.5 rounded-none text-xs font-medium text-white/60 hover:text-white bg-white/5 hover:bg-white/10 transition-all"
+            >
+              Load Templates
+            </button>
+          </div>
+        )}
       </div>
 
       {targetsWithProgress.length === 0 ? (
         <div className="text-center py-20">
           <p className="text-white/40 text-sm">No targets yet</p>
-          <Button size="sm" className="mt-3" onClick={() => setShowTargetDialog(true)}>Create your first target</Button>
+          <p className="text-white/20 text-xs mt-2">
+            {mode === 'main' ? 'Switch to Builder to create targets' : 'Create your first target to get started'}
+          </p>
+          {mode === 'builder' && (
+            <Button size="sm" className="mt-4" onClick={() => setShowTargetDialog(true)}>Create your first target</Button>
+          )}
         </div>
       ) : (
         <div>
@@ -385,7 +591,7 @@ export default function DashboardPage() {
             const sectionTargets = targetsWithProgress.filter((t) => t.time_section === key)
             const isOver = dragOverSection === (key ?? '__unscheduled__')
             return (
-              <div key={label} className="mb-5">
+              <div key={key ?? 'unscheduled'} className="mb-5">
                 <div
                   className={`flex items-center gap-3 mb-2 px-1 py-1.5 rounded-none transition-colors ${
                     isOver ? 'bg-white/10' : ''
@@ -417,39 +623,76 @@ export default function DashboardPage() {
                             target.is_completed ? 'border-white/80' : ''
                           } ${dragTargetId === target.id ? 'opacity-30' : ''}`}
                         >
-                          <button
-                            onClick={() => toggleTarget(target.id)}
-                            className="w-full flex items-center justify-between p-3 text-left"
-                          >
-                            <div className="flex items-center gap-2 min-w-0">
-                              <span
-                                className="text-white/40 transition-transform duration-200 text-base shrink-0"
-                                style={{ transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)' }}
-                              >
-                                ›
-                              </span>
-                              <h3 className="font-semibold text-sm text-white/90 truncate">{target.title}</h3>
-                            </div>
-                            <div className="flex items-center gap-2 shrink-0 ml-2">
-                              <span className="text-xs font-medium text-white/50">
-                                ◈ {target.completed_count}/{target.total_count}
-                              </span>
-                              <div className="w-12 h-1 rounded-none bg-white/10 overflow-hidden">
-                                <div
-                                  className={`h-full transition-all duration-300 ${
-                                    target.is_completed ? 'bg-white' : 'bg-white/60'
-                                  }`}
-                                  style={{ width: `${target.completion_pct}%` }}
-                                />
+                          <div className="flex items-center">
+                            <button
+                              onClick={() => toggleTarget(target.id)}
+                              className="flex-1 flex items-center justify-between p-3 text-left"
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span
+                                  className="text-white/40 transition-transform duration-200 text-base shrink-0"
+                                  style={{ transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)' }}
+                                >
+                                  ›
+                                </span>
+                                <h3 className="font-semibold text-sm text-white/90 truncate">{target.title}</h3>
                               </div>
-                            </div>
-                          </button>
+                              <div className="flex items-center gap-2 shrink-0 ml-2">
+                                <span className="text-xs font-medium text-white/50">
+                                  ◈ {target.completed_count}/{target.total_count}
+                                </span>
+                                <div className="w-12 h-1 rounded-none bg-white/10 overflow-hidden">
+                                  <div
+                                    className={`h-full transition-all duration-300 ${
+                                      target.is_completed ? 'bg-white' : 'bg-white/60'
+                                    }`}
+                                    style={{ width: `${target.completion_pct}%` }}
+                                  />
+                                </div>
+                              </div>
+                            </button>
+                            {mode === 'builder' && (
+                              <button
+                                onClick={() => handleDeleteTarget(target.id)}
+                                className="px-3 py-3 text-white/30 hover:text-red-400 transition-colors text-sm leading-none"
+                                title="Delete target"
+                              >
+                                ×
+                              </button>
+                            )}
+                          </div>
                           {expanded && (
                             <div className="px-3 pb-6 pt-2 overflow-x-auto">
                               {target.tasks.length > 0 ? (
-                                <SkillTree tasks={target.tasks} onToggleComplete={handleToggleComplete} />
+                                mode === 'main' ? (
+                                  <SkillTree tasks={target.tasks} onToggleComplete={handleToggleComplete} />
+                                ) : (
+                                  <TargetBuilderTree
+                                    tasks={target.tasks}
+                                    builderMode={builderSubMode}
+                                    connectSource={connectSource}
+                                    showPopup={showPopup}
+                                    onNodeTap={handleBuilderNodeTap}
+                                    onDisconnect={handleDisconnect}
+                                    onAddChild={(nodeId) => handleBuilderAddChild(target.id, nodeId)}
+                                    onEdit={handleEditTask}
+                                    onDelete={handleDeleteTask}
+                                    onPopupClose={() => setShowPopup(null)}
+                                  />
+                                )
                               ) : (
-                                <p className="text-white/40 text-xs text-center py-3">No tasks yet</p>
+                                <p className="text-white/40 text-xs text-center py-3">
+                                  {mode === 'builder' ? (
+                                    <button
+                                      onClick={() => handleBuilderAddChild(target.id, null)}
+                                      className="underline underline-offset-2 hover:text-white/60"
+                                    >
+                                      Add first task
+                                    </button>
+                                  ) : (
+                                    'No tasks yet'
+                                  )}
+                                </p>
                               )}
                             </div>
                           )}
@@ -465,11 +708,19 @@ export default function DashboardPage() {
       )}
 
       <Dialog open={showTargetDialog} onClose={() => setShowTargetDialog(false)} title="New Target">
-        <TargetForm onSubmit={handleAddTarget} onCancel={() => setShowTargetDialog(false)} />
+        <TargetForm onSubmit={handleTargetSubmit} onCancel={() => setShowTargetDialog(false)} />
       </Dialog>
 
-      <Dialog open={showTaskDialog} onClose={() => setShowTaskDialog(false)} title="New Task">
-        <TaskForm onSubmit={handleAddTask} onCancel={() => setShowTaskDialog(false)} />
+      <Dialog open={showTaskDialog} onClose={closeTaskDialog} title={editingTask ? 'Edit Task' : 'New Task'}>
+        <TaskForm
+          onSubmit={handleTaskSubmit}
+          onCancel={closeTaskDialog}
+          initial={editingTask ? {
+            title: editingTask.title,
+            description: editingTask.description,
+            completion_type: editingTask.completion_type,
+          } : undefined}
+        />
       </Dialog>
     </div>
   )

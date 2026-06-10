@@ -22,16 +22,6 @@ const links = [
     ),
   },
   {
-    href: '/builder',
-    label: 'Build',
-    icon: (active: boolean) => (
-      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke={active ? 'white' : 'rgba(255,255,255,0.4)'} strokeWidth="1.5" strokeLinecap="round">
-        <circle cx="10" cy="10" r="5.5" />
-        <path d="M10 7v6M7 10h6" />
-      </svg>
-    ),
-  },
-  {
     href: '/library',
     label: 'Library',
     icon: (active: boolean) => (

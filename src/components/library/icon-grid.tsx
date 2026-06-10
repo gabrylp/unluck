@@ -4,10 +4,9 @@ import { useState, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ReferenceLink } from '@/lib/types'
 
-interface IconGridProps {
-  links: ReferenceLink[]
-  onDelete: (id: string) => void
-  onEdit?: (link: ReferenceLink) => void
+function getYouTubeId(url: string): string | null {
+  const match = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/)
+  return match ? match[1] : null
 }
 
 function getFaviconUrl(url: string): string {
@@ -19,7 +18,16 @@ function getFaviconUrl(url: string): string {
   }
 }
 
-export function IconGrid({ links, onDelete, onEdit }: IconGridProps) {
+interface IconGridProps {
+  links: ReferenceLink[]
+  onDelete: (id: string) => void
+  onEdit?: (link: ReferenceLink) => void
+  onPlayVideo?: (videoId: string) => void
+  draggable?: boolean
+  onDragStart?: (e: React.DragEvent, linkId: string) => void
+}
+
+export function IconGrid({ links, onDelete, onEdit, onPlayVideo, draggable, onDragStart }: IconGridProps) {
   const [selected, setSelected] = useState<string | null>(null)
   const [menuOpen, setMenuOpen] = useState<string | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -38,67 +46,78 @@ export function IconGrid({ links, onDelete, onEdit }: IconGridProps) {
   return (
     <>
       <div className="grid grid-cols-4 gap-3">
-        {links.map((link) => (
-          <motion.div
-            key={link.id}
-            layout
-            initial={{ scale: 0, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0, opacity: 0 }}
-            className="glass glass-hover rounded-none p-3 flex flex-col items-center gap-1.5 aspect-square relative"
-          >
-            <button
-              className="flex flex-col items-center gap-1.5 flex-1 w-full"
-              onClick={() => {
-                if (selected === link.id) {
-                  window.open(link.url, '_blank', 'noopener')
-                  setSelected(null)
-                } else {
-                  setSelected(link.id)
-                }
-              }}
+        {links.map((link) => {
+          const videoId = getYouTubeId(link.url)
+          const isVideo = !!videoId
+          return (
+            <motion.div
+              key={link.id}
+              layout
+              initial={{ scale: 0, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0, opacity: 0 }}
+              draggable={draggable}
+              onDragStart={(e: any) => { if (onDragStart) onDragStart(e as React.DragEvent, link.id) }}
+              className="glass glass-hover rounded-none p-3 flex flex-col items-center gap-1.5 aspect-square relative"
             >
-              {link.thumbnail_url ? (
-                <img src={link.thumbnail_url} alt="" className="w-8 h-8 rounded-none object-cover" />
-              ) : (
-                <img
-                  src={getFaviconUrl(link.url)}
-                  alt=""
-                  className="w-8 h-8 rounded-none"
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).src = ''
-                    ;(e.target as HTMLImageElement).style.display = 'none'
-                  }}
-                />
-              )}
-              <span className="text-[10px] text-white/60 text-center leading-tight line-clamp-2">
-                {link.title}
-              </span>
-              {link.tags.length > 0 && (
-                <div className="flex flex-wrap gap-1 justify-center mt-auto">
-                  {link.tags.slice(0, 2).map((tag) => (
-                    <span key={tag} className="text-[7px] text-white/30 px-1 py-0.5 bg-white/5 rounded-none">
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </button>
+              <button
+                className="flex flex-col items-center gap-1.5 flex-1 w-full"
+                onClick={() => {
+                  if (isVideo && onPlayVideo) {
+                    onPlayVideo(videoId!)
+                  } else if (selected === link.id) {
+                    window.open(link.url, '_blank', 'noopener')
+                    setSelected(null)
+                  } else {
+                    setSelected(link.id)
+                  }
+                }}
+              >
+                <div className="relative">
+                  {link.thumbnail_url ? (
+                    <img src={link.thumbnail_url} alt="" className="w-8 h-8 rounded-none object-cover" />
+                  ) : (
+                    <img
+                      src={getFaviconUrl(link.url)}
+                      alt=""
+                      className="w-8 h-8 rounded-none"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src = ''
+                        ;(e.target as HTMLImageElement).style.display = 'none'
+                      }}
+                    />
+                  )}
 
-            <button
-              onClick={(e) => { e.stopPropagation(); setMenuOpen(menuOpen === link.id ? null : link.id) }}
-              className="absolute bottom-1 right-1 w-5 h-5 rounded-none flex items-center justify-center text-[10px] text-white/40 hover:text-white/80 hover:bg-white/10 transition-colors"
-            >
-              ⋮
-            </button>
-          </motion.div>
-        ))}
+                </div>
+                <span className="text-[10px] text-white/60 text-center leading-tight line-clamp-2">
+                  {link.title}
+                </span>
+                {link.tags.length > 0 && (
+                  <div className="flex flex-wrap gap-1 justify-center mt-auto">
+                    {link.tags.slice(0, 2).map((tag) => (
+                      <span key={tag} className="text-[7px] text-white/30 px-1 py-0.5 bg-white/5 rounded-none">
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </button>
+
+              <button
+                onClick={(e) => { e.stopPropagation(); setMenuOpen(menuOpen === link.id ? null : link.id) }}
+                className="absolute bottom-1 right-1 w-5 h-5 rounded-none flex items-center justify-center text-[10px] text-white/40 hover:text-white/80 hover:bg-white/10 transition-colors"
+              >
+                ⋮
+              </button>
+            </motion.div>
+          )
+        })}
       </div>
 
       <AnimatePresence>
         {selected && !menuOpen && (() => {
           const link = links.find((l) => l.id === selected)
-          if (!link) return null
+          if (!link || getYouTubeId(link.url)) return null
           return (
             <motion.div
               initial={{ opacity: 0, y: 20 }}

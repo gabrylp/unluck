@@ -84,6 +84,7 @@ export interface ReferenceLink {
   description: string | null
   thumbnail_url: string | null
   tags: string[]
+  category: 'video' | 'text' | 'book' | 'other'
   created_at: string
 }
 

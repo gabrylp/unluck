@@ -31,7 +31,7 @@ export default function SettingsPage() {
       <h1 className="text-xl font-bold text-white/90 mb-5 pt-3">Settings</h1>
 
       <div className="glass rounded-none p-4 mb-3">
-        <h2 className="font-semibold text-sm text-white/90 mb-3">Streak Mode</h2>
+        <h2 className="font-semibold text-sm text-white/90 mb-3">Consistency</h2>
         <StreakIndicator current={demoStreak.current_streak} longest={demoStreak.longest_streak} />
         <div className="flex gap-2 mt-3">
           <button

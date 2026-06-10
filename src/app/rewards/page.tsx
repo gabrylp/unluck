@@ -57,6 +57,12 @@ export default function RewardsPage() {
     toast.success('Reward created')
   }
 
+  const handleSeedTemplates = () => {
+    if (!confirm('Replace all rewards with template rewards?')) return
+    persist({ ...data, rewards: demoRewards })
+    toast.success('Templates loaded')
+  }
+
   const handleRedeem = (reward: RewardTemplate) => {
     if (data.points.current_balance < reward.point_cost) {
       toast.error('Not enough points')
@@ -86,6 +92,12 @@ export default function RewardsPage() {
         <h1 className="text-xl font-bold text-white/90">Rewards</h1>
         <div className="flex items-center gap-2">
           <PointBadge balance={data.points.current_balance} />
+          <button
+            onClick={handleSeedTemplates}
+            className="px-3 py-1.5 rounded-none text-xs font-medium text-white/60 hover:text-white bg-white/5 hover:bg-white/10 transition-all"
+          >
+            Load Templates
+          </button>
           <Button size="sm" onClick={() => setShowForm(true)}>+ New Reward</Button>
         </div>
       </div>
