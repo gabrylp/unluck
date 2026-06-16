@@ -9,34 +9,64 @@ import { PointBadge } from '@/components/points/point-badge'
 import { RewardTemplate, UserPoints, RewardRedemption } from '@/lib/types'
 import { demoRewards, demoPoints, demoUserId } from '@/lib/demo-data'
 import { toast } from 'sonner'
+import { supabase } from '@/lib/supabase'
+import { useAuth } from '@/components/providers'
 
-const STORAGE_KEY = 'unluck-rewards'
+async function loadData() {
+  const [rewardsRes, redemptionsRes, pointsRes] = await Promise.all([
+    supabase.from('reward_templates').select('*'),
+    supabase.from('reward_redemptions').select('*'),
+    supabase.from('user_points').select('*').maybeSingle(),
+  ])
 
-function loadData() {
-  if (typeof window === 'undefined') return null
-  const stored = localStorage.getItem(STORAGE_KEY)
-  if (stored) return JSON.parse(stored)
-  return null
+  const rewards = rewardsRes.data || []
+  return {
+    rewards,
+    redemptions: redemptionsRes.data || [],
+    points: pointsRes.data || { total_earned: 0, total_spent: 0, current_balance: 0 },
+  }
 }
 
-function saveData(data: any) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
+async function saveData(data: any) {
+  await Promise.all([
+    supabase.from('reward_templates').upsert(
+      (data.rewards || []).map((r: RewardTemplate) => ({
+        id: r.id, title: r.title, description: r.description ?? '', point_cost: r.point_cost, icon: r.icon ?? null, created_at: r.created_at, updated_at: new Date().toISOString(),
+      })),
+      { onConflict: 'id' },
+    ),
+    supabase.from('reward_redemptions').upsert(
+      (data.redemptions || []).map((r: RewardRedemption) => ({
+        id: r.id, reward_template_id: r.reward_template_id, points_spent: r.points_spent, redeemed_at: r.redeemed_at,
+      })),
+      { onConflict: 'id' },
+    ),
+    supabase.from('user_points').upsert({
+      total_earned: data.points?.total_earned ?? 0,
+      total_spent: data.points?.total_spent ?? 0,
+      current_balance: data.points?.current_balance ?? 0,
+    }, { onConflict: 'user_id' }),
+  ])
 }
 
 export default function RewardsPage() {
+  const { user } = useAuth()
   const [data, setData] = useState<any>(null)
   const [showForm, setShowForm] = useState(false)
   const [selectedReward, setSelectedReward] = useState<RewardTemplate | null>(null)
   const [redemptions, setRedemptions] = useState<RewardRedemption[]>([])
 
   useEffect(() => {
-    const saved = loadData()
-    setData(saved || { rewards: [], points: { total_earned: 0, total_spent: 0, current_balance: 0 } })
-  }, [])
+    if (!user) return
+    ;(async () => {
+      const saved = await loadData()
+      setData(saved || { rewards: [], redemptions: [], points: { total_earned: 0, total_spent: 0, current_balance: 0 } })
+    })()
+  }, [user])
 
-  const persist = useCallback((newData: any) => {
+  const persist = useCallback(async (newData: any) => {
     setData(newData)
-    saveData(newData)
+    await saveData(newData)
   }, [])
 
   if (!data) return null
@@ -80,8 +110,7 @@ export default function RewardsPage() {
       points_spent: reward.point_cost,
       redeemed_at: new Date().toISOString(),
     }
-    persist({ ...data, points: newPoints })
-    setRedemptions([newRedemption, ...redemptions])
+    persist({ ...data, points: newPoints, redemptions: [newRedemption, ...data.redemptions] })
     setSelectedReward(null)
     toast.success(`"${reward.title}" redeemed!`)
   }

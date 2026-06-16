@@ -13,8 +13,8 @@ import { TargetWithProgress, Task, TimeSection, CompletionType } from '@/lib/typ
 import { buildTaskTree, getParentChain, getAllDescendantIds } from '@/lib/utils'
 import { demoUserId } from '@/lib/demo-data'
 import { toast } from 'sonner'
-
-const STORAGE_KEY = 'unluck-demo'
+import { supabase } from '@/lib/supabase'
+import { useAuth } from '@/components/providers'
 
 const SECTIONS: { label: string; key: TimeSection | null }[] = [
   { label: 'Morning', key: 'morning' },
@@ -23,17 +23,72 @@ const SECTIONS: { label: string; key: TimeSection | null }[] = [
   { label: 'Unscheduled', key: null },
 ]
 
-function loadData() {
-  if (typeof window === 'undefined') return null
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY)
-    if (stored) return JSON.parse(stored)
-  } catch {}
-  return null
+async function loadData() {
+  const [targetsRes, tasksRes, completionsRes, pointsRes, streaksRes] = await Promise.all([
+    supabase.from('targets').select('*'),
+    supabase.from('tasks').select('*'),
+    supabase.from('completions').select('*'),
+    supabase.from('user_points').select('*').maybeSingle(),
+    supabase.from('streaks').select('*').maybeSingle(),
+  ])
+
+  const targets = targetsRes.data || []
+  if (targets.length === 0) return null
+
+  return {
+    targets,
+    tasks: tasksRes.data || [],
+    completions: completionsRes.data || [],
+    points: pointsRes.data || { total_earned: 0, total_spent: 0, current_balance: 0 },
+    streak: streaksRes.data || { current_streak: 0, longest_streak: 0, last_activity_date: null, streak_mode: 'easy' },
+  }
 }
 
-function saveData(data: any) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
+async function saveData(data: any) {
+  const targetIds = (data.targets || []).map((t: any) => t.id)
+  const taskIds = (data.tasks || []).map((t: any) => t.id)
+  const completionIds = (data.completions || []).map((c: any) => c.id)
+
+  await Promise.all([
+    supabase.from('targets').upsert(
+      (data.targets || []).map((t: any) => ({
+        id: t.id, title: t.title, time_section: t.time_section ?? null, sort_order: t.sort_order ?? 0, created_at: t.created_at, updated_at: new Date().toISOString(),
+      })),
+      { onConflict: 'id' },
+    ).then(() => {
+      if (targetIds.length > 0) return supabase.from('targets').delete().not('id', 'in', `(${targetIds.map((id: string) => `'${id}'`).join(',')})`)
+      return supabase.from('targets').delete().not('id', 'is', null)
+    }),
+    supabase.from('tasks').upsert(
+      (data.tasks || []).map((t: any) => ({
+        id: t.id, target_id: t.target_id, parent_id: t.parent_id ?? null, title: t.title, description: t.description ?? '', sort_order: t.sort_order ?? 0, created_at: t.created_at, updated_at: new Date().toISOString(),
+      })),
+      { onConflict: 'id' },
+    ).then(() => {
+      if (taskIds.length > 0) return supabase.from('tasks').delete().not('id', 'in', `(${taskIds.map((id: string) => `'${id}'`).join(',')})`)
+      return supabase.from('tasks').delete().not('id', 'is', null)
+    }),
+    supabase.from('completions').upsert(
+      (data.completions || []).map((c: any) => ({
+        id: c.id, task_id: c.task_id, completed_date: c.completed_date, points_awarded: c.points_awarded ?? 1, created_at: c.created_at,
+      })),
+      { onConflict: 'id' },
+    ).then(() => {
+      if (completionIds.length > 0) return supabase.from('completions').delete().not('id', 'in', `(${completionIds.map((id: string) => `'${id}'`).join(',')})`)
+      return supabase.from('completions').delete().not('id', 'is', null)
+    }),
+    supabase.from('user_points').upsert({
+      total_earned: data.points?.total_earned ?? 0,
+      total_spent: data.points?.total_spent ?? 0,
+      current_balance: data.points?.current_balance ?? 0,
+    }, { onConflict: 'user_id' }),
+    supabase.from('streaks').upsert({
+      current_streak: data.streak?.current_streak ?? 0,
+      longest_streak: data.streak?.longest_streak ?? 0,
+      last_activity_date: data.streak?.last_activity_date ?? null,
+      streak_mode: data.streak?.streak_mode ?? 'easy',
+    }, { onConflict: 'user_id' }),
+  ])
 }
 
 function isSubtreeComplete(node: any, completed: Set<string>): boolean {
@@ -54,6 +109,7 @@ function markSubtreeComplete(node: any, completed: Set<string>, subtreeSet: Set<
 }
 
 export default function DashboardPage() {
+  const { user } = useAuth()
   const [data, setData] = useState<any>(null)
   const [mode, setMode] = useState<'main' | 'builder'>('main')
   const [builderSubMode, setBuilderSubMode] = useState<'task' | 'connect'>('task')
@@ -72,17 +128,20 @@ export default function DashboardPage() {
   useEffect(() => { dataRef.current = data }, [data])
 
   useEffect(() => {
-    const saved = loadData()
-    const initial = saved || {
-      targets: [],
-      tasks: [],
-      completions: [],
-      points: { total_earned: 0, total_spent: 0, current_balance: 0 },
-      streak: { current_streak: 0, longest_streak: 0, last_activity_date: '', streak_mode: 'easy' },
-    }
-    setData(initial)
-    setExpandedTargets(new Set(initial.targets.map((t: any) => t.id)))
-  }, [])
+    if (!user) return
+    ;(async () => {
+      const saved = await loadData()
+      const initial = saved || {
+        targets: [],
+        tasks: [],
+        completions: [],
+        points: { total_earned: 0, total_spent: 0, current_balance: 0 },
+        streak: { current_streak: 0, longest_streak: 0, last_activity_date: '', streak_mode: 'easy' },
+      }
+      setData(initial)
+      setExpandedTargets(new Set(initial.targets.map((t: any) => t.id)))
+    })()
+  }, [user])
 
   useEffect(() => {
     if (mode === 'main') {
@@ -92,9 +151,9 @@ export default function DashboardPage() {
     }
   }, [mode])
 
-  const persist = useCallback((newData: any) => {
+  const persist = useCallback(async (newData: any) => {
     setData(newData)
-    saveData(newData)
+    await saveData(newData)
   }, [])
 
   if (!data) return null

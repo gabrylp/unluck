@@ -1,34 +1,53 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { StreakIndicator } from '@/components/streaks/streak-indicator'
 import { StreakMode } from '@/lib/types'
-import { demoStreak } from '@/lib/demo-data'
 import { toast } from 'sonner'
-
-const STORAGE_KEY = 'unluck-settings'
+import { supabase } from '@/lib/supabase'
+import { useAuth } from '@/components/providers'
 
 export default function SettingsPage() {
-  const [streakMode, setStreakMode] = useState<StreakMode>(() => {
-    if (typeof window === 'undefined') return 'easy'
+  const { user } = useAuth()
+  const [streakMode, setStreakMode] = useState<StreakMode>('easy')
+  const [streak, setStreak] = useState<{ current_streak: number; longest_streak: number }>({ current_streak: 0, longest_streak: 0 })
+  const [loaded, setLoaded] = useState(false)
 
-    const saved = localStorage.getItem(STORAGE_KEY)
-    if (!saved) return 'easy'
+  useEffect(() => {
+    if (!user) return
+    ;(async () => {
+      const { data } = await supabase.from('streaks').select('*').maybeSingle()
+      if (data) {
+        setStreakMode((data.streak_mode as StreakMode) || 'easy')
+        setStreak({ current_streak: data.current_streak ?? 0, longest_streak: data.longest_streak ?? 0 })
+      }
+      setLoaded(true)
+    })()
+  }, [user])
 
-    try {
-      const parsed = JSON.parse(saved)
-      return parsed.streakMode || 'easy'
-    } catch {
-      return 'easy'
-    }
-  })
-
-  const updateMode = (mode: StreakMode) => {
+  const updateMode = async (mode: StreakMode) => {
     setStreakMode(mode)
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ streakMode: mode }))
+    await supabase.from('streaks').upsert({ streak_mode: mode }, { onConflict: 'user_id' })
     toast.success(`Streak mode set to ${mode}`)
   }
+
+  const clearData = async () => {
+    if (!confirm('Clear all data? This cannot be undone.')) return
+    await Promise.all([
+      supabase.from('targets').delete().neq('id', 'none'),
+      supabase.from('tasks').delete().neq('id', 'none'),
+      supabase.from('completions').delete().neq('id', 'none'),
+      supabase.from('user_points').delete().neq('id', 'none'),
+      supabase.from('streaks').delete().neq('id', 'none'),
+      supabase.from('reward_templates').delete().neq('id', 'none'),
+      supabase.from('reward_redemptions').delete().neq('id', 'none'),
+      supabase.from('reference_links').delete().neq('id', 'none'),
+    ])
+    toast.success('Data cleared. Reload the page.')
+  }
+
+  if (!loaded) return null
 
   return (
     <div className="pb-4">
@@ -36,7 +55,7 @@ export default function SettingsPage() {
 
       <div className="glass rounded-none p-4 mb-3">
         <h2 className="font-semibold text-sm text-white/90 mb-3">Consistency</h2>
-        <StreakIndicator current={demoStreak.current_streak} longest={demoStreak.longest_streak} />
+        <StreakIndicator current={streak.current_streak} longest={streak.longest_streak} />
         <div className="flex gap-2 mt-3">
           <button
             onClick={() => updateMode('easy')}
@@ -76,16 +95,7 @@ export default function SettingsPage() {
       <div className="glass rounded-none p-4">
         <h2 className="font-semibold text-sm text-white/90 mb-2">Data</h2>
         <div className="flex gap-2">
-          <Button
-            variant="danger"
-            size="sm"
-            onClick={() => {
-              if (confirm('Clear all demo data?')) {
-                localStorage.clear()
-                toast.success('Data cleared. Reload the page.')
-              }
-            }}
-          >
+          <Button variant="danger" size="sm" onClick={clearData}>
             Clear All Data
           </Button>
         </div>

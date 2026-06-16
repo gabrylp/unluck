@@ -10,8 +10,8 @@ import { Button } from '@/components/ui/button'
 import { ReferenceLink } from '@/lib/types'
 import { demoLinks, demoUserId } from '@/lib/demo-data'
 import { toast } from 'sonner'
-
-const STORAGE_KEY = 'unluck-library'
+import { supabase } from '@/lib/supabase'
+import { useAuth } from '@/components/providers'
 
 const CATEGORIES: { key: ReferenceLink['category']; label: string }[] = [
   { key: 'video', label: 'Videos' },
@@ -20,18 +20,27 @@ const CATEGORIES: { key: ReferenceLink['category']; label: string }[] = [
   { key: 'other', label: 'Other' },
 ]
 
-function loadData() {
-  if (typeof window === 'undefined') return null
-  const stored = localStorage.getItem(STORAGE_KEY)
-  if (stored) return JSON.parse(stored)
-  return null
+async function loadData() {
+  const { data } = await supabase.from('reference_links').select('*')
+  return data || []
 }
 
-function saveData(data: ReferenceLink[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
+async function saveData(links: ReferenceLink[]) {
+  if (links.length === 0) {
+    await supabase.from('reference_links').delete().neq('id', 'none')
+    return
+  }
+  await supabase.from('reference_links').upsert(
+    links.map((l) => ({
+      id: l.id, title: l.title, url: l.url, description: l.description ?? null,
+      thumbnail_url: l.thumbnail_url ?? null, tags: l.tags || [], category: l.category ?? 'other', created_at: l.created_at,
+    })),
+    { onConflict: 'id' },
+  )
 }
 
 export default function LibraryPage() {
+  const { user } = useAuth()
   const [links, setLinks] = useState<ReferenceLink[]>([])
   const [showDialog, setShowDialog] = useState(false)
   const [editingLink, setEditingLink] = useState<ReferenceLink | null>(null)
@@ -39,13 +48,16 @@ export default function LibraryPage() {
   const [playingVideo, setPlayingVideo] = useState<string | null>(null)
 
   useEffect(() => {
-    const saved = loadData()
-    setLinks(saved || [])
-  }, [])
+    if (!user) return
+    ;(async () => {
+      const saved = await loadData()
+      setLinks(saved)
+    })()
+  }, [user])
 
-  const persist = useCallback((newLinks: ReferenceLink[]) => {
+  const persist = useCallback(async (newLinks: ReferenceLink[]) => {
     setLinks(newLinks)
-    saveData(newLinks)
+    await saveData(newLinks)
   }, [])
 
   const handleAdd = (formData: { title: string; url: string; description: string; tags: string[]; category: string }) => {
